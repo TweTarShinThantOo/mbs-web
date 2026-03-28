@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import { useCart } from "../../../context/CartContext";
 import { useAuth } from "../../../context/AuthContext";
-import { useMascots } from "../../../context/MascotContext";
+import { supabase } from "../../../lib/supabase";
 
 const defaultInclusions = "Full costume + Performer, 3 hrs";
 const defaultService = "Friendly and Energetic Mascot";
@@ -78,10 +78,7 @@ function Navbar() {
                   Settings
                 </Link>
                 <div className="border-t border-gray-100" />
-                <button
-                  onClick={() => { logout(); setDropdownOpen(false); router.push("/"); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-red-500 text-sm font-medium hover:bg-red-50 transition-colors"
-                >
+                <button onClick={() => { logout(); setDropdownOpen(false); router.push("/"); }} className="w-full flex items-center gap-3 px-4 py-3 text-red-500 text-sm font-medium hover:bg-red-50 transition-colors">
                   <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                   </svg>
@@ -211,18 +208,54 @@ export default function MascotDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { addToCart } = useCart();
-  const { mascots } = useMascots();
 
+  const [mascot, setMascot] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState("");
   const [added, setAdded] = useState(false);
   const [error, setError] = useState("");
 
-  const mascot = mascots.find((m) => String(m.id) === String(params.id));
+  // ✅ Fetch single mascot from Supabase by ID
+  useEffect(() => {
+    async function fetchMascot() {
+      try {
+        const { data, error } = await supabase
+          .from("mascots")
+          .select("*")
+          .eq("mascot_id", params.id)
+          .single();
+        if (error) throw error;
+        // ✅ Map Supabase columns to UI fields
+        setMascot({
+          id: data.mascot_id,
+          name: data.mascot_name,
+          category: data.Category,
+          description: data.description || "",
+          price: data.price,
+          image: data.image || null,
+          inclusions: data.inclusions || defaultInclusions,
+          service: defaultService,
+          recommendations: defaultRecommendations,
+          note: defaultNote,
+        });
+      } catch (err) {
+        console.error("Failed to fetch mascot:", err);
+        setMascot(null);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchMascot();
+  }, [params.id]);
 
-  const inclusions = mascot?.inclusions || defaultInclusions;
-  const service = mascot?.service || defaultService;
-  const recommendations = mascot?.recommendations || defaultRecommendations;
-  const note = mascot?.note || defaultNote;
+  if (loading) return (
+    <div className="min-h-screen bg-neutral-900 flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-8 h-8 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-white text-sm">Loading...</p>
+      </div>
+    </div>
+  );
 
   if (!mascot) return (
     <div className="min-h-screen bg-neutral-900 flex items-center justify-center">
@@ -232,6 +265,11 @@ export default function MascotDetailPage() {
       </div>
     </div>
   );
+
+  const inclusions = mascot.inclusions || defaultInclusions;
+  const service = mascot.service || defaultService;
+  const recommendations = mascot.recommendations || defaultRecommendations;
+  const note = mascot.note || defaultNote;
 
   const handleAddToCart = () => {
     if (!selectedDate) { setError("Please select an event date from the calendar."); return; }
@@ -272,19 +310,26 @@ export default function MascotDetailPage() {
           </div>
 
           <div className="bg-yellow-400 rounded-xl p-5 mb-4">
-            <div className="flex items-start gap-2 mb-3">
-              <span className="text-red-500 text-sm">❤</span>
-              <p className="text-black text-sm font-medium">Service : {service} ⭐ ⭐ ⭐</p>
-            </div>
-            <div className="flex items-start gap-2 mb-3">
-              <span className="text-sm">ℹ️</span>
-              <p className="text-black text-sm font-medium">Recommendations: {recommendations}</p>
-            </div>
-            <div className="flex items-start gap-2">
-              <span className="text-sm">📌</span>
-              <p className="text-black text-sm font-medium">Note: {note}</p>
-            </div>
-          </div>
+  <div className="flex items-start gap-2 mb-3">
+    <span className="text-red-500 text-sm">❤</span>
+    <p className="text-black text-sm font-medium">Service : {service} ⭐ ⭐ ⭐</p>
+  </div>
+  {/* ✅ Show real description from Supabase */}
+  {mascot.description && (
+    <div className="flex items-start gap-2 mb-3">
+      <span className="text-sm">📝</span>
+      <p className="text-black text-sm font-medium">{mascot.description}</p>
+    </div>
+  )}
+  <div className="flex items-start gap-2 mb-3">
+    <span className="text-sm">ℹ️</span>
+    <p className="text-black text-sm font-medium">Recommendations: {recommendations}</p>
+  </div>
+  <div className="flex items-start gap-2">
+    <span className="text-sm">📌</span>
+    <p className="text-black text-sm font-medium">Note: {note}</p>
+  </div>
+</div>
 
           {selectedDate && (
             <p className="text-green-600 text-sm font-semibold mb-3">
