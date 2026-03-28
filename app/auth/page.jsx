@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCart } from "../../context/CartContext";
 import { useAuth } from "../../context/AuthContext";
+import { supabase } from "../../lib/supabase";
 
 function Navbar() {
   const { cart } = useCart();
@@ -92,21 +93,55 @@ export default function AuthPage() {
 
   const [loginData, setLoginData] = useState({ email: "", password: "" });
   const [loginErrors, setLoginErrors] = useState({});
+  const [loginLoading, setLoginLoading] = useState(false);
 
   const [signupData, setSignupData] = useState({ fullname: "", email: "", password: "", confirm: "" });
   const [signupErrors, setSignupErrors] = useState({});
   const [signupSuccess, setSignupSuccess] = useState(false);
+  const [signupLoading, setSignupLoading] = useState(false);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     const errors = {};
     if (!loginData.email.trim()) errors.email = "Email is required";
     if (!loginData.password.trim()) errors.password = "Password is required";
     if (Object.keys(errors).length > 0) { setLoginErrors(errors); return; }
-    login({ name: loginData.email.split("@")[0], email: loginData.email });
-    router.push("/");
+
+    setLoginLoading(true);
+    try {
+      // ✅ Sign in with Supabase Auth
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: loginData.email.trim(),
+        password: loginData.password,
+      });
+
+      if (error) {
+        setLoginErrors({ email: error.message });
+        return;
+      }
+
+      // ✅ Fetch user profile from users table
+      const { data: profile } = await supabase
+        .from("users")
+        .select("name, email, phone")
+        .eq("user_id", data.user.id)
+        .single();
+
+      login({
+        id: data.user.id,
+        name: profile?.name || loginData.email.split("@")[0],
+        email: data.user.email,
+        phone: profile?.phone || "",
+      });
+
+      router.push("/");
+    } catch (err) {
+      setLoginErrors({ email: "Login failed. Please try again." });
+    } finally {
+      setLoginLoading(false);
+    }
   };
 
-  const handleSignup = () => {
+  const handleSignup = async () => {
     const errors = {};
     if (!signupData.fullname.trim()) errors.fullname = "Full name is required";
     if (!signupData.email.trim()) errors.email = "Email is required";
@@ -115,9 +150,40 @@ export default function AuthPage() {
     else if (signupData.password.length < 6) errors.password = "At least 6 characters";
     if (signupData.confirm !== signupData.password) errors.confirm = "Passwords do not match";
     if (Object.keys(errors).length > 0) { setSignupErrors(errors); return; }
-    login({ name: signupData.fullname, email: signupData.email });
-    setSignupSuccess(true);
-    setSignupErrors({});
+
+    setSignupLoading(true);
+    try {
+      // ✅ Sign up with Supabase Auth
+      const { data, error } = await supabase.auth.signUp({
+        email: signupData.email.trim(),
+        password: signupData.password,
+      });
+
+      if (error) {
+        setSignupErrors({ email: error.message });
+        return;
+      }
+
+      // ✅ Save user profile to users table
+      await supabase.from("users").insert({
+        user_id: data.user.id,
+        name: signupData.fullname.trim(),
+        email: signupData.email.trim(),
+      });
+
+      login({
+        id: data.user.id,
+        name: signupData.fullname.trim(),
+        email: signupData.email.trim(),
+      });
+
+      setSignupSuccess(true);
+      setSignupErrors({});
+    } catch (err) {
+      setSignupErrors({ email: "Signup failed. Please try again." });
+    } finally {
+      setSignupLoading(false);
+    }
   };
 
   return (
@@ -128,16 +194,10 @@ export default function AuthPage() {
         <div className="w-full max-w-md bg-white rounded-xl shadow-lg overflow-hidden">
 
           <div className="grid grid-cols-2">
-            <button
-              onClick={() => setTab("login")}
-              className={`py-4 text-sm font-bold transition-colors ${tab === "login" ? "bg-yellow-400 text-black" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
-            >
+            <button onClick={() => setTab("login")} className={`py-4 text-sm font-bold transition-colors ${tab === "login" ? "bg-yellow-400 text-black" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}>
               Log In
             </button>
-            <button
-              onClick={() => setTab("signup")}
-              className={`py-4 text-sm font-bold transition-colors ${tab === "signup" ? "bg-yellow-400 text-black" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
-            >
+            <button onClick={() => setTab("signup")} className={`py-4 text-sm font-bold transition-colors ${tab === "signup" ? "bg-yellow-400 text-black" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}>
               Sign Up
             </button>
           </div>
@@ -152,7 +212,6 @@ export default function AuthPage() {
           </div>
 
           <div className="px-8 py-8">
-
             {tab === "login" && (
               <div>
                 <h2 className="text-gray-900 font-extrabold text-xl mb-1">Welcome Back</h2>
@@ -185,9 +244,10 @@ export default function AuthPage() {
                   </div>
                   <button
                     onClick={handleLogin}
-                    className="w-full py-3 bg-yellow-400 hover:bg-yellow-500 text-black font-bold rounded-lg transition-colors text-sm"
+                    disabled={loginLoading}
+                    className="w-full py-3 bg-yellow-400 hover:bg-yellow-500 disabled:opacity-50 text-black font-bold rounded-lg transition-colors text-sm"
                   >
-                    Log In
+                    {loginLoading ? "Logging in..." : "Log In"}
                   </button>
                   <p className="text-center text-sm text-gray-500">
                     Do not have an account?{" "}
@@ -207,11 +267,8 @@ export default function AuthPage() {
                       </svg>
                     </div>
                     <p className="text-gray-900 font-bold text-lg mb-1">Account Created!</p>
-                    <p className="text-gray-500 text-sm mb-6">Redirecting you to the home page...</p>
-                    <button
-                      onClick={() => router.push("/")}
-                      className="w-full py-3 bg-yellow-400 hover:bg-yellow-500 text-black font-bold rounded-lg transition-colors text-sm"
-                    >
+                    <p className="text-gray-500 text-sm mb-6">You are now logged in.</p>
+                    <button onClick={() => router.push("/")} className="w-full py-3 bg-yellow-400 hover:bg-yellow-500 text-black font-bold rounded-lg transition-colors text-sm">
                       Go to Home
                     </button>
                   </div>
@@ -266,9 +323,10 @@ export default function AuthPage() {
                       </div>
                       <button
                         onClick={handleSignup}
-                        className="w-full py-3 bg-black hover:bg-gray-800 text-white font-bold rounded-lg transition-colors text-sm"
+                        disabled={signupLoading}
+                        className="w-full py-3 bg-black hover:bg-gray-800 disabled:opacity-50 text-white font-bold rounded-lg transition-colors text-sm"
                       >
-                        Create Account
+                        {signupLoading ? "Creating account..." : "Create Account"}
                       </button>
                       <p className="text-center text-sm text-gray-500">
                         Already have an account?{" "}
@@ -279,7 +337,6 @@ export default function AuthPage() {
                 )}
               </div>
             )}
-
           </div>
         </div>
       </main>
