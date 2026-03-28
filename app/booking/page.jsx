@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCart } from "../../context/CartContext";
 import { useAuth } from "../../context/AuthContext";
+import { supabase } from "../../lib/supabase";
 
 function Navbar() {
   const { cart } = useCart();
@@ -147,6 +148,7 @@ function generateTicket() {
 export default function BookingPage() {
   const router = useRouter();
   const { cart, total: cartTotal, clearCart } = useCart();
+  const { user } = useAuth();
 
   const [paymentMethod, setPaymentMethod] = useState("Credit Card");
   const [additionalFees, setAdditionalFees] = useState({ extraStaff: false, photoVideo: false });
@@ -154,79 +156,108 @@ export default function BookingPage() {
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   const extraStaffFee = additionalFees.extraStaff ? 10 : 0;
   const photoVideoFee = additionalFees.photoVideo ? 15 : 0;
   const tax = Math.round(cartTotal * 0.05);
   const total = cartTotal + tax + extraStaffFee + photoVideoFee;
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
+    // Validate fields
     const newErrors = {};
     if (!name.trim()) newErrors.name = "Name is required";
     if (!phone.trim()) newErrors.phone = "Phone number is required";
     if (!address.trim()) newErrors.address = "Address is required";
     if (Object.keys(newErrors).length > 0) { setErrors(newErrors); return; }
 
-    const ticket = generateTicket();
+    // Require login
+    if (!user?.id) {
+      setSubmitError("You must be logged in to book.");
+      return;
+    }
 
-    const booking = {
-      id: ticket,
-      customer: name.trim(),
-      phone: phone,
-      event: cart.map(item => item.name).join(", "),
-      bookingDate: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
-      location: address,
-      address: address,
-      payment: `${paymentMethod} — $${total}`,
-      total: total,
-      status: "Pending",
-      addOns: [
+    setLoading(true);
+    setSubmitError("");
+
+    try {
+      const ticket = generateTicket();
+
+      // Get the first cart item's date as event_date (or today as fallback)
+      const eventDate = cart[0]?.date || new Date().toISOString().slice(0, 10);
+      const eventType = cart.map(item => item.name).join(", ");
+      const addOns = [
         ...(additionalFees.extraStaff ? ["Extra Staff"] : []),
         ...(additionalFees.photoVideo ? ["Photo & Video"] : []),
-      ],
-    };
+      ];
 
-    // Save to sessionStorage for track page
-    sessionStorage.setItem(`booking_${ticket}`, JSON.stringify(booking));
+      // ✅ Save booking to Supabase bookings table
+      const { data: bookingData, error: bookingError } = await supabase
+        .from("bookings")
+        .insert([
+          {
+            booking_ticket_no: ticket,
+            event_date: eventDate,
+            event_type: eventType,
+            event_address: address,
+            total_price: total,
+            status: "pending",
+            user_id: user.id,
+          },
+        ])
+        .select()
+        .single();
 
-    // Mark each mascot's booked date as unavailable
-    try {
-      const bookedDates = JSON.parse(localStorage.getItem("cmr_booked_dates") || "{}");
-      cart.forEach(item => {
-        if (item.date && item.id) {
-          const mascotId = String(item.id);
-          if (!bookedDates[mascotId]) bookedDates[mascotId] = [];
-          if (!bookedDates[mascotId].includes(item.date)) {
-            bookedDates[mascotId].push(item.date);
-          }
-        }
-      });
-      localStorage.setItem("cmr_booked_dates", JSON.stringify(bookedDates));
-    } catch {}
+      if (bookingError) throw bookingError;
 
-    // Also save directly to localStorage so admin sees it immediately
-    try {
-      const existing = JSON.parse(localStorage.getItem("cmr_bookings") || "[]");
-      const deletedIds = JSON.parse(localStorage.getItem("cmr_deleted_bookings") || "[]");
-      if (!existing.find(b => b.id === booking.id) && !deletedIds.includes(booking.id)) {
-        const adminBooking = {
-          id: booking.id,
-          event: booking.event,
-          customer: booking.customer,
-          date: booking.bookingDate,
-          status: booking.status,
-          phone: booking.phone,
-          location: booking.address,
-          payment: booking.payment,
-        };
-        localStorage.setItem("cmr_bookings", JSON.stringify([...existing, adminBooking]));
+      const bookingId = bookingData.booking_id;
+
+      // ✅ Save each cart item to booking_items table
+      if (cart.length > 0) {
+        const bookingItems = cart.map(item => ({
+          booking_id: bookingId,
+          mascot_id: item.id,
+          mascot_name: item.name,
+          price: item.price,
+          date: item.date || eventDate,
+        }));
+
+        const { error: itemsError } = await supabase
+          .from("booking_items")
+          .insert(bookingItems);
+
+        // Non-fatal: log but don't block confirmation if booking_items fails
+        if (itemsError) console.warn("booking_items insert failed:", itemsError);
       }
-    } catch {}
 
-    clearCart();
-    router.push(
-      `/confirmation?ticket=${ticket}&total=${total}&name=${encodeURIComponent(name)}&phone=${encodeURIComponent(phone)}&address=${encodeURIComponent(address)}`
-    );
+      // Save to sessionStorage for confirmation/track page
+      const booking = {
+        id: ticket,
+        booking_id: bookingId,
+        customer: name.trim(),
+        phone,
+        event: eventType,
+        bookingDate: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+        location: address,
+        address,
+        payment: `${paymentMethod} — $${total}`,
+        total,
+        status: "pending",
+        addOns,
+      };
+      sessionStorage.setItem(`booking_${ticket}`, JSON.stringify(booking));
+
+      clearCart();
+      router.push(
+        `/confirmation?ticket=${ticket}&total=${total}&name=${encodeURIComponent(name)}&phone=${encodeURIComponent(phone)}&address=${encodeURIComponent(address)}`
+      );
+    } catch (err) {
+      console.error("Booking failed:", err);
+      setSubmitError("Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -350,25 +381,35 @@ export default function BookingPage() {
           </div>
 
           {/* Total + Actions */}
-          <div className="px-8 py-5 bg-gray-50 flex items-center justify-between">
-            <div className="text-sm text-gray-700">
-              <span className="font-semibold">Total ( Tax Included ): </span>
-              <span className="text-gray-900 font-bold text-base">${total}</span>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={handleConfirm}
-                disabled={cart.length === 0}
-                className="px-7 py-3 bg-yellow-400 hover:bg-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed text-black font-bold rounded-lg transition-colors text-sm"
-              >
-                Confirm
-              </button>
-              <button
-                onClick={() => router.push("/cart")}
-                className="px-7 py-3 bg-black hover:bg-gray-800 text-white font-bold rounded-lg transition-colors text-sm"
-              >
-                Cancel
-              </button>
+          <div className="px-8 py-5 bg-gray-50">
+            {submitError && (
+              <p className="text-red-500 text-sm mb-3 text-center">{submitError}</p>
+            )}
+            {!user?.id && (
+              <p className="text-orange-500 text-sm mb-3 text-center">
+                Please <Link href="/auth" className="underline font-bold">log in</Link> before confirming your booking.
+              </p>
+            )}
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-700">
+                <span className="font-semibold">Total ( Tax Included ): </span>
+                <span className="text-gray-900 font-bold text-base">${total}</span>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleConfirm}
+                  disabled={cart.length === 0 || loading}
+                  className="px-7 py-3 bg-yellow-400 hover:bg-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed text-black font-bold rounded-lg transition-colors text-sm"
+                >
+                  {loading ? "Processing..." : "Confirm"}
+                </button>
+                <button
+                  onClick={() => router.push("/cart")}
+                  className="px-7 py-3 bg-black hover:bg-gray-800 text-white font-bold rounded-lg transition-colors text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
 
