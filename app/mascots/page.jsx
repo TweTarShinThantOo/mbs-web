@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCart } from "../../context/CartContext";
 import { useAuth } from "../../context/AuthContext";
-import { useMascots } from "../../context/MascotContext";
+import { supabase } from "../../lib/supabase";
 
 const categories = [
   { label: "Princess", icon: "👸" },
@@ -81,10 +81,7 @@ function Navbar() {
                   Settings
                 </Link>
                 <div className="border-t border-gray-100" />
-                <button
-                  onClick={() => { logout(); setDropdownOpen(false); router.push("/"); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-red-500 text-sm font-medium hover:bg-red-50 transition-colors"
-                >
+                <button onClick={() => { logout(); setDropdownOpen(false); router.push("/"); }} className="w-full flex items-center gap-3 px-4 py-3 text-red-500 text-sm font-medium hover:bg-red-50 transition-colors">
                   <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                   </svg>
@@ -144,11 +141,38 @@ function ListIcon({ active }) {
 }
 
 export default function MascotsPage() {
-  const { mascots } = useMascots();
+  // ✅ Fetch directly from Supabase — maps Supabase column names to UI field names
+  const [mascots, setMascots] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState("grid");
   const [showFilter, setShowFilter] = useState(true);
+
+  useEffect(() => {
+  async function fetchMascots() {
+    try {
+      const { data, error } = await supabase.from("mascots").select("*");
+      if (error) throw error;
+      const mapped = (data || []).map(m => ({
+  id: m.mascot_id,
+  name: m.mascot_name,
+  category: m.Category,  // ✅ capital C
+  description: m.description || "",
+  price: m.price,
+  image: m.image || null,  // ✅ also changed from image_url to image
+}));
+      console.log("Mapped mascots:", mapped); // ✅ here
+      setMascots(mapped);
+    } catch (err) {
+      console.error("Failed to fetch mascots:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+  fetchMascots();
+}, []);
+ 
 
   const filtered = mascots.filter((m) => {
     const matchCategory = selectedCategory === "All" || m.category === selectedCategory;
@@ -193,71 +217,78 @@ export default function MascotsPage() {
             </div>
           </div>
 
-          <div className="flex gap-6">
-            {showFilter && (
-              <div className="w-40 flex-shrink-0 bg-gray-50 rounded-xl p-3 border border-gray-200">
-                <button onClick={() => setSelectedCategory("All")} className={`w-full text-left px-3 py-2 rounded-lg text-sm font-semibold mb-1 transition-colors ${selectedCategory === "All" ? "bg-yellow-400 text-black" : "text-gray-600 hover:bg-yellow-50"}`}>
-                  All
-                </button>
-                {categories.map((cat) => (
-                  <button key={cat.label} onClick={() => setSelectedCategory(cat.label)} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium mb-1 transition-colors ${selectedCategory === cat.label ? "bg-yellow-400 text-black font-semibold" : "text-gray-600 hover:bg-yellow-50"}`}>
-                    <span>{cat.icon}</span>{cat.label}
+          {loading ? (
+            <div className="py-20 text-center text-gray-400">
+              <div className="w-8 h-8 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              Loading mascots...
+            </div>
+          ) : (
+            <div className="flex gap-6">
+              {showFilter && (
+                <div className="w-40 flex-shrink-0 bg-gray-50 rounded-xl p-3 border border-gray-200">
+                  <button onClick={() => setSelectedCategory("All")} className={`w-full text-left px-3 py-2 rounded-lg text-sm font-semibold mb-1 transition-colors ${selectedCategory === "All" ? "bg-yellow-400 text-black" : "text-gray-600 hover:bg-yellow-50"}`}>
+                    All
                   </button>
-                ))}
-              </div>
-            )}
-            <div className="flex-1">
-              {filtered.length === 0 ? (
-                <div className="py-20 text-center text-gray-400">No mascots found.</div>
-              ) : viewMode === "grid" ? (
-                <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filtered.map((mascot) => (
-                    <div key={mascot.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col">
-                      <div className="w-full h-36 bg-yellow-100 flex items-center justify-center overflow-hidden">
-                        {mascot.image ? (
-                          <img src={mascot.image} alt={mascot.name} className="object-cover w-full h-full" />
-                        ) : (
-                          <div className="w-20 h-20 bg-yellow-300 rounded-xl flex items-center justify-center">
-                            <span className="text-yellow-700 text-3xl">🎭</span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="p-3 flex flex-col flex-1">
-                        <p className="text-gray-800 font-semibold text-sm mb-1">{mascot.name}</p>
-                        <p className="text-gray-400 text-xs mb-1 flex-1">{mascot.category}</p>
-                        <p className="text-yellow-500 font-bold text-sm mb-3">${mascot.price}</p>
-                        <Link href={`/mascots/${mascot.id}`} className="block text-center bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-2 rounded-lg transition-colors text-xs">
-                          View Details
-                        </Link>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {filtered.map((mascot) => (
-                    <div key={mascot.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow flex items-center gap-4 p-4">
-                      <div className="w-20 h-16 bg-yellow-100 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
-                        {mascot.image ? (
-                          <img src={mascot.image} alt={mascot.name} className="object-cover w-full h-full rounded-lg" />
-                        ) : (
-                          <span className="text-2xl">🎭</span>
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-gray-800 font-semibold text-sm">{mascot.name}</p>
-                        <p className="text-gray-400 text-xs">{mascot.category} · {mascot.description}</p>
-                      </div>
-                      <p className="text-yellow-500 font-bold text-sm mr-4">${mascot.price}</p>
-                      <Link href={`/mascots/${mascot.id}`} className="bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-2 px-5 rounded-lg transition-colors text-xs flex-shrink-0">
-                        View Details
-                      </Link>
-                    </div>
+                  {categories.map((cat) => (
+                    <button key={cat.label} onClick={() => setSelectedCategory(cat.label)} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium mb-1 transition-colors ${selectedCategory === cat.label ? "bg-yellow-400 text-black font-semibold" : "text-gray-600 hover:bg-yellow-50"}`}>
+                      <span>{cat.icon}</span>{cat.label}
+                    </button>
                   ))}
                 </div>
               )}
+              <div className="flex-1">
+                {filtered.length === 0 ? (
+                  <div className="py-20 text-center text-gray-400">No mascots found.</div>
+                ) : viewMode === "grid" ? (
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filtered.map((mascot) => (
+                      <div key={mascot.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col">
+                        <div className="w-full h-36 bg-yellow-100 flex items-center justify-center overflow-hidden">
+                          {mascot.image ? (
+                            <img src={mascot.image} alt={mascot.name} className="object-cover w-full h-full" />
+                          ) : (
+                            <div className="w-20 h-20 bg-yellow-300 rounded-xl flex items-center justify-center">
+                              <span className="text-yellow-700 text-3xl">🎭</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="p-3 flex flex-col flex-1">
+                          <p className="text-gray-800 font-semibold text-sm mb-1">{mascot.name}</p>
+                          <p className="text-gray-400 text-xs mb-1 flex-1">{mascot.category}</p>
+                          <p className="text-yellow-500 font-bold text-sm mb-3">${mascot.price}</p>
+                          <Link href={`/mascots/${mascot.id}`} className="block text-center bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-2 rounded-lg transition-colors text-xs">
+                            View Details
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {filtered.map((mascot) => (
+                      <div key={mascot.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow flex items-center gap-4 p-4">
+                        <div className="w-20 h-16 bg-yellow-100 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
+                          {mascot.image ? (
+                            <img src={mascot.image} alt={mascot.name} className="object-cover w-full h-full rounded-lg" />
+                          ) : (
+                            <span className="text-2xl">🎭</span>
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-gray-800 font-semibold text-sm">{mascot.name}</p>
+                          <p className="text-gray-400 text-xs">{mascot.category} · {mascot.description}</p>
+                        </div>
+                        <p className="text-yellow-500 font-bold text-sm mr-4">${mascot.price}</p>
+                        <Link href={`/mascots/${mascot.id}`} className="bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-2 px-5 rounded-lg transition-colors text-xs flex-shrink-0">
+                          View Details
+                        </Link>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </main>
       <Footer />
