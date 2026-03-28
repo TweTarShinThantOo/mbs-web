@@ -3,16 +3,14 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAdminAuth } from "../../../context/AdminAuthContext";
+import { supabase } from "../../../lib/supabase";
 
 function AdminSidebar({ active }) {
   const [collapsed, setCollapsed] = useState(false);
   return (
     <div className={`bg-yellow-400 flex flex-col transition-all duration-300 ${collapsed ? "w-16" : "w-64"} min-h-screen flex-shrink-0`}>
       <div className="flex flex-col px-3 gap-2">
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="flex items-center justify-center py-3 px-4 hover:bg-yellow-500 rounded-xl transition-colors"
-        >
+        <button onClick={() => setCollapsed(!collapsed)} className="flex items-center justify-center py-3 px-4 hover:bg-yellow-500 rounded-xl transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
           </svg>
@@ -41,7 +39,7 @@ function AdminSidebar({ active }) {
 }
 
 function AdminNavbar() {
-  const { admin, adminLogout } = useAdminAuth();
+  const { admin } = useAdminAuth();
   const router = useRouter();
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef(null);
@@ -63,14 +61,11 @@ function AdminNavbar() {
         <h1 className="text-white font-extrabold text-xl">Welcome to Admin Panel !</h1>
       </div>
       <div className="flex items-center gap-5">
-        {/* Bell — links to notifications page */}
         <button onClick={() => router.push("/admin/notifications")} className="relative hover:text-yellow-400 transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
           </svg>
         </button>
-
-        {/* Profile dropdown */}
         <div className="relative" ref={profileRef}>
           <button onClick={() => setProfileOpen(!profileOpen)} className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <div className="w-9 h-9 rounded-full bg-yellow-400 flex items-center justify-center">
@@ -116,29 +111,22 @@ function AdminNavbar() {
 
 function DonutChart({ available, pending, booked }) {
   const total = Math.max(available + pending + booked, 1);
-  const r = 60;
-  const cx = 80;
-  const cy = 80;
+  const r = 60, cx = 80, cy = 80;
   const circumference = 2 * Math.PI * r;
   const availableDash = (available / total) * circumference;
   const pendingDash = (pending / total) * circumference;
   const bookedDash = (booked / total) * circumference;
-  const pendingOffset = -availableDash;
-  const bookedOffset = -(availableDash + pendingDash);
   return (
     <svg width="140" height="140" viewBox="0 0 160 160">
       <circle cx={cx} cy={cy} r={r} fill="none" stroke="#e5e7eb" strokeWidth="24" />
       <circle cx={cx} cy={cy} r={r} fill="none" stroke="#22c55e" strokeWidth="24"
-        strokeDasharray={`${availableDash} ${circumference}`}
-        strokeDashoffset={0}
+        strokeDasharray={`${availableDash} ${circumference}`} strokeDashoffset={0}
         transform={`rotate(-90 ${cx} ${cy})`} />
       <circle cx={cx} cy={cy} r={r} fill="none" stroke="#eab308" strokeWidth="24"
-        strokeDasharray={`${pendingDash} ${circumference}`}
-        strokeDashoffset={pendingOffset}
+        strokeDasharray={`${pendingDash} ${circumference}`} strokeDashoffset={-availableDash}
         transform={`rotate(-90 ${cx} ${cy})`} />
       <circle cx={cx} cy={cy} r={r} fill="none" stroke="#ef4444" strokeWidth="24"
-        strokeDasharray={`${bookedDash} ${circumference}`}
-        strokeDashoffset={bookedOffset}
+        strokeDasharray={`${bookedDash} ${circumference}`} strokeDashoffset={-(availableDash + pendingDash)}
         transform={`rotate(-90 ${cx} ${cy})`} />
       <circle cx={cx} cy={cy} r={46} fill="white" />
     </svg>
@@ -153,12 +141,31 @@ function MiniCalendar() {
   const [allBookedDates, setAllBookedDates] = useState([]);
 
   useEffect(() => {
+  async function fetchBookedDates() {
     try {
-      const stored = JSON.parse(localStorage.getItem("cmr_booked_dates") || "{}");
-      const combined = Object.values(stored).flat();
-      setAllBookedDates([...new Set(combined)]);
-    } catch {}
-  }, []);
+      const { data, error } = await supabase
+        .from("bookings")
+        .select("event_date, status")
+        .neq("status", "cancelled");
+      if (error) throw error;
+      const dates = (data || [])
+        .map(b => {
+          try {
+            const d = new Date(b.event_date);
+            if (!isNaN(d)) return d.toISOString().slice(0, 10);
+          } catch {}
+          return null;
+        })
+        .filter(Boolean);
+      setAllBookedDates([...new Set(dates)]);
+      console.log("Booked dates:", dates);
+    } catch (err) {
+      console.error("Failed to fetch booked dates:", err);
+    
+    }
+  }
+  fetchBookedDates();
+}, []);
 
   const years = [2028, 2027, 2026, 2025, 2024];
   const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -188,7 +195,8 @@ function MiniCalendar() {
           {showYearDropdown && (
             <div className="absolute right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 w-24">
               {years.map((y) => (
-                <button key={y} onClick={() => { setSelectedYear(y); setCurrentDate(new Date(y, month, 1)); setShowYearDropdown(false); }} className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${y === selectedYear ? "bg-black text-white font-bold" : "text-gray-700"}`}>{y}</button>
+                <button key={y} onClick={() => { setSelectedYear(y); setCurrentDate(new Date(y, month, 1)); setShowYearDropdown(false); }}
+                  className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${y === selectedYear ? "bg-black text-white font-bold" : "text-gray-700"}`}>{y}</button>
               ))}
             </div>
           )}
@@ -230,10 +238,13 @@ function MiniCalendar() {
 }
 
 const statusStyle = {
+  approved: "bg-green-500 text-white",
+  pending: "bg-orange-400 text-white",
+  cancelled: "bg-red-500 text-white",
   Approved: "bg-green-500 text-white",
   Pending: "bg-orange-400 text-white",
   Cancelled: "bg-red-500 text-white",
-};
+};;
 
 export default function AdminDashboard() {
   const { admin } = useAdminAuth();
@@ -242,20 +253,35 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (!admin) router.push("/admin/login");
-  }, [admin]);
+  }, [admin, router]);
 
-  useEffect(() => {
+ useEffect(() => {
+  async function fetchBookings() {
     try {
-      const stored = localStorage.getItem("cmr_bookings");
-      if (stored) setBookings(JSON.parse(stored));
-    } catch {}
-  }, []);
+      const { data, error } = await supabase
+        .from("bookings")
+        .select("booking_id, booking_ticket_no, event_date, event_type, status, total_price");
+      if (error) throw error;
+      console.log("Bookings from Supabase:", data); // ✅ add here
+      setBookings((data || []).map(b => ({
+        id: b.booking_ticket_no || b.booking_id,
+        customer: "Customer",
+        date: b.event_date,
+        status: b.status,
+        event: b.event_type || "—",
+      })));
+    } catch (err) {
+      console.error("Failed to fetch bookings:", err);
+    }
+  }
+  fetchBookings();
+}, []);
 
   if (!admin) return null;
 
   const totalBookings = bookings.length;
-  const pendingCount = bookings.filter(b => b.status === "Pending").length;
-  const approvedCount = bookings.filter(b => b.status === "Approved").length;
+ const pendingCount = bookings.filter(b => b.status === "pending").length;
+const approvedCount = bookings.filter(b => b.status === "approved").length;
 
   const TOTAL_SLOTS = 100;
   const bookedSlots = approvedCount;
@@ -266,9 +292,11 @@ export default function AdminDashboard() {
   const monthCounts = {};
   bookings.forEach(b => {
     if (!b.date) return;
-    const parts = b.date.split(" ");
-    const short = parts[0]?.slice(0, 3);
-    if (short) monthCounts[short] = (monthCounts[short] || 0) + 1;
+    try {
+      const d = new Date(b.date);
+      const short = d.toLocaleString("en-US", { month: "short" });
+      if (short) monthCounts[short] = (monthCounts[short] || 0) + 1;
+    } catch {}
   });
   const last6Months = monthOrder.slice(0, 6);
   const monthlyValues = last6Months.map(m => monthCounts[m] || 0);
@@ -277,7 +305,15 @@ export default function AdminDashboard() {
   const thisMonthCount = monthCounts[thisMonthShort] || 0;
   const estimatedRevenue = (approvedCount * 35).toLocaleString();
   const avgPerDay = totalBookings > 0 ? (totalBookings / 30).toFixed(1) : "0";
-  const recentBookings = [...bookings].slice(-3).reverse();
+
+  const formatDate = (dateStr) => {
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    } catch {
+      return dateStr;
+    }
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-neutral-900">
@@ -297,31 +333,47 @@ export default function AdminDashboard() {
               <p className="text-yellow-800 text-xs">{pendingCount} {pendingCount === 1 ? "client is" : "clients are"} waiting for response</p>
             </div>
 
-            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm cursor-pointer hover:border-yellow-400 hover:shadow-md transition-all group" onClick={() => router.push("/admin/bookings")}>
-              <div className="flex items-center justify-between mb-3">
+            {/* Latest Bookings Table */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm cursor-pointer hover:border-yellow-400 hover:shadow-md transition-all group col-span-2" onClick={() => router.push("/admin/bookings")}>
+              <div className="flex items-center justify-between mb-4">
                 <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Latest Bookings</p>
                 <span className="text-xs text-yellow-600 font-semibold group-hover:underline">View all →</span>
               </div>
-              {recentBookings.length === 0 ? (
+              {bookings.length === 0 ? (
                 <p className="text-gray-400 text-xs text-center py-6">No bookings yet.</p>
               ) : (
-                <div className="space-y-2">
-                  {recentBookings.map((b) => (
-                    <div key={b.id} className="border border-gray-100 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-gray-800 font-bold text-xs">{b.id}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${statusStyle[b.status]}`}>{b.status}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-600 text-xs">{b.customer}</span>
-                        <span className="text-gray-400 text-xs">{b.date}</span>
-                      </div>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className="text-left px-3 py-2 font-bold text-gray-600 text-xs">Booking ID</th>
+                        <th className="text-left px-3 py-2 font-bold text-gray-600 text-xs">Customer</th>
+                        <th className="text-left px-3 py-2 font-bold text-gray-600 text-xs">Date</th>
+                        <th className="text-left px-3 py-2 font-bold text-gray-600 text-xs">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bookings.map((b, idx) => (
+                        <tr key={b.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                          <td className="px-3 py-3 text-gray-800 font-bold text-xs">{`CMR-${String(bookings.length - idx).padStart(3, "0")}`}</td>
+                          <td className="px-3 py-3 text-gray-600 text-xs">{b.customer}</td>
+                          <td className="px-3 py-3 text-gray-500 text-xs">{formatDate(b.date)}</td>
+                          <td className="px-3 py-3">
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${statusStyle[b.status?.toLowerCase()] || "bg-gray-200 text-gray-600"}`}>
+                              {b.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
+          </div>
 
+          {/* Row 2 */}
+          <div className="grid grid-cols-3 gap-5 mb-6">
             <div className="bg-gray-100 rounded-xl p-4 h-full flex flex-col">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-gray-800 font-bold text-sm">Monthly Bookings</h3>
@@ -353,11 +405,8 @@ export default function AdminDashboard() {
                 ))}
               </div>
             </div>
-          </div>
 
-          {/* Row 2 */}
-          <div className="grid grid-cols-2 gap-5">
-            <div className="bg-gray-100 rounded-xl p-5">
+            <div className="col-span-2 bg-gray-100 rounded-xl p-5">
               <h3 className="text-gray-800 font-bold text-sm mb-4">Booking Summary</h3>
               <div className="flex items-center gap-4">
                 <DonutChart available={availableSlots} pending={pendingSlots} booked={bookedSlots} />
@@ -384,9 +433,12 @@ export default function AdminDashboard() {
                 </div>
               </div>
             </div>
-            <MiniCalendar />
           </div>
 
+          {/* Row 3 */}
+          <div className="grid grid-cols-1">
+            <MiniCalendar />
+          </div>
         </main>
       </div>
 
