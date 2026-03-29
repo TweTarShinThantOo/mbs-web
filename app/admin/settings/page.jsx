@@ -132,20 +132,20 @@ function AdminNavbar() {
 }
 
 export default function AdminSettings() {
-  const { admin, adminLogout } = useAdminAuth();
+  const { admin, adminLogout, hydrated } = useAdminAuth();
   const router = useRouter();
   const [saved, setSaved] = useState(false);
   const [notifications, setNotifications] = useState({ newBooking: true, statusChange: true, cancellation: true });
   const [privacy, setPrivacy] = useState({ showEmail: false, twoFactor: false });
 
   useEffect(() => {
-    if (!admin) router.push("/admin/login");
+    if (hydrated && !admin) router.push("/admin/login");
     try {
       const s = JSON.parse(localStorage.getItem("cmr_admin_settings") || "{}");
       if (s.notifications) setNotifications(s.notifications);
       if (s.privacy) setPrivacy(s.privacy);
     } catch {}
-  }, [admin]);
+  }, [admin, hydrated]);
 
   if (!admin) return null;
 

@@ -247,13 +247,13 @@ const statusStyle = {
 };;
 
 export default function AdminDashboard() {
-  const { admin } = useAdminAuth();
+  const { admin, hydrated } = useAdminAuth();
   const router = useRouter();
   const [bookings, setBookings] = useState([]);
 
   useEffect(() => {
-    if (!admin) router.push("/admin/login");
-  }, [admin, router]);
+    if (hydrated && !admin) router.push("/admin/login");
+  }, [admin, router, hydrated]);
 
  useEffect(() => {
   async function fetchBookings() {

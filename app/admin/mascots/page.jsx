@@ -262,7 +262,7 @@ function MascotForm({ form, setForm, formErrors, setFormErrors, imageRef, handle
 const emptyForm = { name: "", category: "Princess", description: "", price: "", image: null };
 
 export default function AdminMascots() {
-  const { admin } = useAdminAuth();
+  const { admin, hydrated } = useAdminAuth();
   const router = useRouter();
 
   // ✅ Supabase state instead of context
@@ -283,7 +283,7 @@ export default function AdminMascots() {
   const imageRef = useRef(null);
   const filterRef = useRef(null);
 
-  useEffect(() => { if (!admin) router.push("/admin/login"); }, [admin]);
+  useEffect(() => { if (hydrated && !admin) router.push("/admin/login"); }, [admin, hydrated]);
 
   useEffect(() => {
     function handleClick(e) { if (filterRef.current && !filterRef.current.contains(e.target)) setFilterOpen(false); }

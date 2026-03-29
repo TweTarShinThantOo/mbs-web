@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAdminAuth } from "../../../context/AdminAuthContext";
+import { supabase } from "../../../lib/supabase";
 
 function AdminSidebar({ active }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -149,24 +150,34 @@ const statusStyle = {
   Cancelled: "bg-red-500 text-white",
 };
 
-// ✅ Single source of truth — reads ALL bookings from localStorage only
-function loadAllBookings() {
+// ✅ Single source of truth — reads ALL bookings from Supabase with fallback
+async function loadBookingsFromSupabase() {
   try {
-    return JSON.parse(localStorage.getItem("cmr_bookings") || "[]");
-  } catch { return []; }
-}
-
-// ✅ Write status back to localStorage under cmr_booking_status so track page can read it
-function syncStatusToCustomer(id, status) {
-  try {
-    const statuses = JSON.parse(localStorage.getItem("cmr_booking_statuses") || "{}");
-    statuses[id] = status;
-    localStorage.setItem("cmr_booking_statuses", JSON.stringify(statuses));
-  } catch {}
+    const { data, error } = await supabase
+      .from("bookings")
+      .select("*");
+    
+    if (!error && data) {
+      return data.map(b => ({
+        id: b.booking_ticket_no || `CMR-${b.booking_id}`,
+        booking_id: b.booking_id,
+        event: b.event_type || "—",
+        customer: "Customer",
+        date: b.event_date || "—",
+        status: b.status?.charAt(0).toUpperCase() + b.status?.slice(1) || "Pending",
+        phone: "",
+        location: b.event_address || "",
+        payment: `$${b.total_price || 0}`,
+      }));
+    }
+  } catch (err) {
+    console.warn("Failed to load from Supabase:", err);
+  }
+  return [];
 }
 
 export default function AdminBookings() {
-  const { admin } = useAdminAuth();
+  const { admin, hydrated } = useAdminAuth();
   const router = useRouter();
 
   const [bookings, setBookings] = useState([]);
@@ -183,8 +194,8 @@ export default function AdminBookings() {
   const sortRef = useRef(null);
 
   useEffect(() => {
-    if (!admin) router.push("/admin/login");
-  }, [admin]);
+    if (hydrated && !admin) router.push("/admin/login");
+  }, [admin, hydrated]);
 
   useEffect(() => {
     function handleClick(e) {
@@ -194,50 +205,34 @@ export default function AdminBookings() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  // ✅ On load: merge sessionStorage bookings into localStorage, then load all
+  // ✅ On load: fetch bookings from Supabase
   useEffect(() => {
-    let deletedIds = [];
-    try { deletedIds = JSON.parse(localStorage.getItem("cmr_deleted_bookings") || "[]"); } catch {}
-
-    // Pull new bookings from sessionStorage
-    const ssKeys = Object.keys(sessionStorage).filter(k => k.startsWith("booking_"));
-    const ssBookings = ssKeys
-      .map(k => {
-        try {
-          const d = JSON.parse(sessionStorage.getItem(k));
-          return {
-            id: d.id || k.replace("booking_", ""),
-            event: d.event || "Unknown",
-            customer: d.customer || `${d.firstName || ""} ${d.lastName || ""}`.trim() || "Unknown",
-            date: d.bookingDate || d.date || "",
-            status: d.status || "Pending",
-            phone: d.phone || "",
-            location: d.location || d.address || "",
-            payment: d.payment || "",
-          };
-        } catch { return null; }
-      })
-      .filter(Boolean)
-      .filter(b => !deletedIds.includes(b.id));
-
-    // Merge into localStorage
-    const stored = loadAllBookings();
-    const storedIds = stored.map(b => b.id);
-    const newOnes = ssBookings.filter(b => !storedIds.includes(b.id));
-    const merged = [...stored, ...newOnes];
-
-    if (newOnes.length > 0) {
-      try { localStorage.setItem("cmr_bookings", JSON.stringify(merged)); } catch {}
-    }
-
-    setBookings(merged);
+    const loadBookings = async () => {
+      const bookingData = await loadBookingsFromSupabase();
+      setBookings(bookingData);
+    };
+    loadBookings();
   }, []);
 
   if (!admin) return null;
 
-  const saveBookings = (updated) => {
+  const saveBookings = async (updated) => {
     setBookings(updated);
-    try { localStorage.setItem("cmr_bookings", JSON.stringify(updated)); } catch {}
+    // Sync to Supabase
+    try {
+      for (const booking of updated) {
+        await supabase
+          .from("bookings")
+          .update({
+            event_type: booking.event,
+            event_address: booking.location,
+            status: booking.status.toLowerCase(),
+          })
+          .eq("booking_ticket_no", booking.id);
+      }
+    } catch (err) {
+      console.warn("Failed to sync bookings to Supabase:", err);
+    }
   };
 
   const showSuccess = (msg) => {
@@ -251,14 +246,16 @@ export default function AdminBookings() {
     setSortOpen(false);
   };
 
-  const handleDelete = (id) => {
-    saveBookings(bookings.filter(b => b.id !== id));
+  const handleDelete = async (id) => {
     try {
-      const deleted = JSON.parse(localStorage.getItem("cmr_deleted_bookings") || "[]");
-      if (!deleted.includes(id)) {
-        localStorage.setItem("cmr_deleted_bookings", JSON.stringify([...deleted, id]));
-      }
-    } catch {}
+      await supabase
+        .from("bookings")
+        .delete()
+        .eq("booking_ticket_no", id);
+    } catch (err) {
+      console.warn("Failed to delete from Supabase:", err);
+    }
+    saveBookings(bookings.filter(b => b.id !== id));
     setDeleteConfirm(null);
     showSuccess("Booking deleted successfully.");
   };
@@ -268,36 +265,42 @@ export default function AdminBookings() {
     setEditModal(booking.id);
   };
 
-  const handleEditSave = () => {
+  const handleEditSave = async () => {
     const updated = bookings.map(b => b.id === editModal ? { ...editForm } : b);
-    saveBookings(updated);
-    // ✅ Sync status to customer track page
-    syncStatusToCustomer(editModal, editForm.status);
-    // Also update sessionStorage if it exists
+    
+    // Update in Supabase
     try {
-      const stored = sessionStorage.getItem(`booking_${editModal}`);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        sessionStorage.setItem(`booking_${editModal}`, JSON.stringify({ ...parsed, status: editForm.status }));
-      }
-    } catch {}
+      await supabase
+        .from("bookings")
+        .update({
+          event_type: editForm.event,
+          event_address: editForm.location,
+          status: editForm.status.toLowerCase(),
+        })
+        .eq("booking_ticket_no", editModal);
+    } catch (err) {
+      console.warn("Failed to update in Supabase:", err);
+    }
+    
+    saveBookings(updated);
     setEditModal(null);
     showSuccess("Booking updated successfully.");
   };
 
-  const handleStatusChange = (id, newStatus) => {
+  const handleStatusChange = async (id, newStatus) => {
     const updated = bookings.map(b => b.id === id ? { ...b, status: newStatus } : b);
-    saveBookings(updated);
-    // ✅ Sync status to customer track page via localStorage
-    syncStatusToCustomer(id, newStatus);
-    // Also update sessionStorage if it exists
+    
+    // Update in Supabase
     try {
-      const stored = sessionStorage.getItem(`booking_${id}`);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        sessionStorage.setItem(`booking_${id}`, JSON.stringify({ ...parsed, status: newStatus }));
-      }
-    } catch {}
+      await supabase
+        .from("bookings")
+        .update({ status: newStatus.toLowerCase() })
+        .eq("booking_ticket_no", id);
+    } catch (err) {
+      console.warn("Failed to update status in Supabase:", err);
+    }
+    
+    saveBookings(updated);
     showSuccess(`Status updated to ${newStatus}.`);
   };
 

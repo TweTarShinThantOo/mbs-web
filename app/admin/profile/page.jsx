@@ -132,7 +132,7 @@ function AdminNavbar() {
 }
 
 export default function AdminProfile() {
-  const { admin, adminLogin } = useAdminAuth();
+  const { admin, adminLogin, hydrated } = useAdminAuth();
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(admin?.name || "");
@@ -140,8 +140,8 @@ export default function AdminProfile() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    if (!admin) router.push("/admin/login");
-  }, [admin]);
+    if (hydrated && !admin) router.push("/admin/login");
+  }, [admin, hydrated]);
 
   if (!admin) return null;
 

@@ -186,7 +186,7 @@ function buildNotificationsFromBookings(bookings) {
 }
 
 export default function AdminNotifications() {
-  const { admin } = useAdminAuth();
+  const { admin, hydrated } = useAdminAuth();
   const router = useRouter();
   const [notifications, setNotifications] = useState([]);
   const [deletedIds, setDeletedIds] = useState([]);
@@ -198,8 +198,8 @@ export default function AdminNotifications() {
   const filterRef = useRef(null);
 
   useEffect(() => {
-    if (!admin) router.push("/admin/login");
-  }, [admin]);
+    if (hydrated && !admin) router.push("/admin/login");
+  }, [admin, hydrated]);
 
   // Load notifications from real bookings + persisted read/deleted state
   useEffect(() => {
