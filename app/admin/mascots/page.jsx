@@ -15,12 +15,7 @@ const categories = [
 
 const ITEMS_PER_PAGE = 6;
 
-function loadBookedDates() {
-  try { return JSON.parse(localStorage.getItem("cmr_booked_dates") || "{}"); } catch { return {}; }
-}
-function saveBookedDates(data) {
-  try { localStorage.setItem("cmr_booked_dates", JSON.stringify(data)); } catch {}
-}
+
 
 function AdminSidebar({ active }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -129,10 +124,8 @@ function AdminNavbar() {
 function MascotCalendarModal({ mascot, onClose }) {
   const today = new Date();
   const [currentMonth, setCurrentMonth] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
-  const [bookedDates, setBookedDates] = useState(() => {
-    const all = loadBookedDates();
-    return all[String(mascot.id)] || [];
-  });
+  const [bookedDates, setBookedDates] = useState([]);
+  const [loadingDates, setLoadingDates] = useState(true);
 
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
@@ -141,17 +134,91 @@ function MascotCalendarModal({ mascot, onClose }) {
   const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const toDateStr = (d) => `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
-  const toggleDate = (d) => {
+  // ✅ Fetch booked dates from Supabase availability table
+  useEffect(() => {
+  async function fetchDates() {
+    setLoadingDates(true);
+    try {
+      // ✅ Fetch from availability table (admin-manually marked dates)
+      const { data: availData } = await supabase
+        .from("availability")
+        .select("date")
+        .eq("mascot_id", mascot.id)
+        .eq("availability_status", "booked");
+
+      // ✅ Fetch from bookings table (customer bookings)
+      const { data: bookingData } = await supabase
+        .from("bookings")
+        .select("event_date, event_type, status")
+        .neq("status", "cancelled");
+
+      const fromAvailability = (availData || []).map(d => d.date).filter(Boolean);
+
+      const fromBookings = (bookingData || [])
+        .filter(b => b.event_type === mascot.name)
+        .map(b => {
+          try {
+            const d = new Date(b.event_date);
+            if (!isNaN(d)) return d.toISOString().slice(0, 10);
+          } catch {}
+          return null;
+        })
+        .filter(Boolean);
+
+      setBookedDates([...new Set([...fromAvailability, ...fromBookings])]);
+    } catch (err) {
+      console.error("Failed to fetch availability:", err);
+    } finally {
+      setLoadingDates(false);
+    }
+  }
+  fetchDates();
+}, [mascot.id]);
+
+  // ✅ Toggle date in Supabase availability table
+  const toggleDate = async (d) => {
     const dateStr = toDateStr(d);
-    const updated = bookedDates.includes(dateStr) ? bookedDates.filter(x => x !== dateStr) : [...bookedDates, dateStr];
-    setBookedDates(updated);
-    const all = loadBookedDates();
-    all[String(mascot.id)] = updated;
-    saveBookedDates(all);
+    const isCurrentlyBooked = bookedDates.includes(dateStr);
+
+    // Optimistic UI update
+    setBookedDates(prev =>
+      isCurrentlyBooked ? prev.filter(x => x !== dateStr) : [...prev, dateStr]
+    );
+
+    try {
+      if (isCurrentlyBooked) {
+        // ✅ Delete from availability
+        const { error } = await supabase
+          .from("availability")
+          .delete()
+          .eq("mascot_id", mascot.id)
+          .eq("date", dateStr);
+        if (error) throw error;
+      } else {
+        // ✅ Insert into availability
+        const { error } = await supabase
+          .from("availability")
+          .insert({
+            mascot_id: mascot.id,
+            date: dateStr,
+            availability_status: "booked",
+          });
+        if (error) throw error;
+      }
+    } catch (err) {
+      console.error("Failed to update availability:", err);
+      // Revert optimistic update on error
+      setBookedDates(prev =>
+        isCurrentlyBooked ? [...prev, dateStr] : prev.filter(x => x !== dateStr)
+      );
+    }
   };
 
   const isBooked = (d) => bookedDates.includes(toDateStr(d));
-  const isToday = (d) => { const t = new Date(); return d === t.getDate() && month === t.getMonth() && year === t.getFullYear(); };
+  const isToday = (d) => {
+    const t = new Date();
+    return d === t.getDate() && month === t.getMonth() && year === t.getFullYear();
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
@@ -180,22 +247,26 @@ function MascotCalendarModal({ mascot, onClose }) {
               <div key={d} className="text-center text-xs font-semibold text-gray-400 py-1">{d}</div>
             ))}
           </div>
-          <div className="grid grid-cols-7 gap-1">
-            {Array(firstDay).fill(null).map((_, i) => <div key={`e-${i}`} />)}
-            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
-              const booked = isBooked(d);
-              const today_ = isToday(d);
-              return (
-                <button key={d} onClick={() => toggleDate(d)}
-                  className={`w-full aspect-square flex items-center justify-center text-xs rounded-lg font-medium transition-colors
-                    ${booked ? "bg-red-500 text-white hover:bg-red-600" : ""}
-                    ${today_ && !booked ? "bg-yellow-400 text-black font-bold hover:bg-yellow-500" : ""}
-                    ${!booked && !today_ ? "hover:bg-gray-100 text-gray-700" : ""}
-                  `}
-                >{d}</button>
-              );
-            })}
-          </div>
+          {loadingDates ? (
+            <div className="py-8 text-center text-gray-400 text-sm">Loading...</div>
+          ) : (
+            <div className="grid grid-cols-7 gap-1">
+              {Array(firstDay).fill(null).map((_, i) => <div key={`e-${i}`} />)}
+              {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
+                const booked = isBooked(d);
+                const today_ = isToday(d);
+                return (
+                  <button key={d} onClick={() => toggleDate(d)}
+                    className={`w-full aspect-square flex items-center justify-center text-xs rounded-lg font-medium transition-colors
+                      ${booked ? "bg-red-500 text-white hover:bg-red-600" : ""}
+                      ${today_ && !booked ? "bg-yellow-400 text-black font-bold hover:bg-yellow-500" : ""}
+                      ${!booked && !today_ ? "hover:bg-gray-100 text-gray-700" : ""}
+                    `}
+                  >{d}</button>
+                );
+              })}
+            </div>
+          )}
           <div className="flex gap-4 mt-4 pt-4 border-t border-gray-100">
             <div className="flex items-center gap-2 text-xs text-gray-600"><div className="w-4 h-4 rounded bg-red-500" /> Booked</div>
             <div className="flex items-center gap-2 text-xs text-gray-600"><div className="w-4 h-4 rounded bg-gray-100 border border-gray-200" /> Available</div>
@@ -262,10 +333,11 @@ function MascotForm({ form, setForm, formErrors, setFormErrors, imageRef, handle
 const emptyForm = { name: "", category: "Princess", description: "", price: "", image: null };
 
 export default function AdminMascots() {
-  const { admin, hydrated } = useAdminAuth();
+  const { admin } = useAdminAuth();
   const router = useRouter();
 
   // ✅ Supabase state instead of context
+  const [mounted, setMounted] = useState(false); // ✅ ADD THIS LINE
   const [mascots, setMascots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -283,7 +355,9 @@ export default function AdminMascots() {
   const imageRef = useRef(null);
   const filterRef = useRef(null);
 
-  useEffect(() => { if (hydrated && !admin) router.push("/admin/login"); }, [admin, hydrated]);
+  useEffect(() => { setMounted(true); }, []); // ✅ ADD THIS LINE
+
+  useEffect(() => { if (!admin) router.push("/admin/login"); }, [admin]);
 
   useEffect(() => {
     function handleClick(e) { if (filterRef.current && !filterRef.current.contains(e.target)) setFilterOpen(false); }
@@ -316,6 +390,9 @@ export default function AdminMascots() {
       setLoading(false);
     }
   }
+
+   if (!mounted) return null;
+  if (!admin) return null;
 
   const showSuccess = (msg) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(""), 2500); };
 
