@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAdminAuth } from "../../../context/AdminAuthContext";
+import { supabase } from "../../../lib/supabase";
 
 function AdminSidebar({ active }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -109,17 +110,10 @@ function AdminNavbar() {
 }
 
 function NotifIcon({ type }) {
-  if (type === "booking") return (
-    <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
-      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-      </svg>
-    </div>
-  );
-  if (type === "cancel") return (
-    <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
-      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+  if (type === "pending") return (
+    <div className="w-10 h-10 rounded-full bg-yellow-100 flex items-center justify-center flex-shrink-0">
+      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
     </div>
   );
@@ -130,124 +124,103 @@ function NotifIcon({ type }) {
       </svg>
     </div>
   );
-  if (type === "pending") return (
-    <div className="w-10 h-10 rounded-full bg-yellow-100 flex items-center justify-center flex-shrink-0">
-      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+  if (type === "cancelled") return (
+    <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
       </svg>
     </div>
   );
   return (
-    <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
+      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
       </svg>
     </div>
   );
 }
 
-// Generate notifications from real bookings
-function buildNotificationsFromBookings(bookings) {
-  const notifs = [];
-  bookings.forEach((b) => {
-    if (b.status === "Pending") {
-      notifs.push({
-        id: `pending-${b.id}`,
-        type: "pending",
-        title: "New Booking Request",
-        desc: `${b.customer} requested booking for ${b.event} on ${b.date}.`,
-        time: b.date || "—",
-        read: false,
-        bookingId: b.id,
-      });
-    } else if (b.status === "Approved") {
-      notifs.push({
-        id: `approved-${b.id}`,
-        type: "approved",
-        title: "Booking Approved",
-        desc: `${b.customer}'s booking for ${b.event} has been approved.`,
-        time: b.date || "—",
-        read: true,
-        bookingId: b.id,
-      });
-    } else if (b.status === "Cancelled") {
-      notifs.push({
-        id: `cancel-${b.id}`,
-        type: "cancel",
-        title: "Booking Cancelled",
-        desc: `${b.customer} cancelled their booking for ${b.event}.`,
-        time: b.date || "—",
-        read: false,
-        bookingId: b.id,
-      });
-    }
-  });
-  return notifs.reverse();
-}
-
 export default function AdminNotifications() {
-  const { admin, hydrated } = useAdminAuth();
+  const { admin } = useAdminAuth();
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
   const [notifications, setNotifications] = useState([]);
-  const [deletedIds, setDeletedIds] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [readIds, setReadIds] = useState([]);
+  const [deletedIds, setDeletedIds] = useState([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("All");
   const [filterOpen, setFilterOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState(null);
   const filterRef = useRef(null);
 
-  useEffect(() => {
-    if (hydrated && !admin) router.push("/admin/login");
-  }, [admin, hydrated]);
+  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => { if (!admin) router.push("/admin/login"); }, [admin]);
 
-  // Load notifications from real bookings + persisted read/deleted state
+  // ✅ Fetch bookings from Supabase and build notifications
   useEffect(() => {
-    try {
-      const bookings = JSON.parse(localStorage.getItem("cmr_bookings") || "[]");
-      const storedDeleted = JSON.parse(localStorage.getItem("cmr_notif_deleted") || "[]");
-      const storedRead = JSON.parse(localStorage.getItem("cmr_notif_read") || "[]");
-      setDeletedIds(storedDeleted);
-      setReadIds(storedRead);
-      const built = buildNotificationsFromBookings(bookings);
-      setNotifications(built);
-    } catch {}
+    async function fetchNotifications() {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("bookings")
+          .select("booking_id, booking_ticket_no, event_type, event_date, status, user_id, users(full_name)")
+          .order("event_date", { ascending: false });
+
+        if (error) throw error;
+
+        // ✅ Load persisted read/deleted from localStorage
+        const storedRead = JSON.parse(localStorage.getItem("cmr_notif_read") || "[]");
+        const storedDeleted = JSON.parse(localStorage.getItem("cmr_notif_deleted") || "[]");
+        setReadIds(storedRead);
+        setDeletedIds(storedDeleted);
+
+        // ✅ Build notifications from bookings
+        const built = (data || []).map(b => {
+          const customerName = b.users?.full_name || "A customer";
+          const eventDate = b.event_date
+            ? new Date(b.event_date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+            : "—";
+          const status = b.status?.toLowerCase();
+
+          let type = "booking";
+          let title = "New Booking";
+          let desc = `${customerName} made a booking for ${b.event_type || "a mascot"} on ${eventDate}.`;
+
+          if (status === "pending") {
+            type = "pending";
+            title = "New Booking Request";
+            desc = `${customerName} requested booking for ${b.event_type || "a mascot"} on ${eventDate}.`;
+          } else if (status === "approved") {
+            type = "approved";
+            title = "Booking Approved";
+            desc = `${customerName}'s booking for ${b.event_type || "a mascot"} on ${eventDate} has been approved.`;
+          } else if (status === "cancelled") {
+            type = "cancelled";
+            title = "Booking Cancelled";
+            desc = `${customerName}'s booking for ${b.event_type || "a mascot"} on ${eventDate} was cancelled.`;
+          }
+
+          return {
+            id: b.booking_id,
+            type,
+            title,
+            desc,
+            time: eventDate,
+            bookingId: b.booking_ticket_no,
+            read: storedRead.includes(b.booking_id),
+          };
+        });
+
+        setNotifications(built.filter(n => !storedDeleted.includes(n.id)));
+      } catch (err) {
+        console.error("Failed to fetch notifications:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchNotifications();
   }, []);
-
-  if (!admin) return null;
-
-  const markAllRead = () => {
-    const allIds = notifications.map(n => n.id);
-    setReadIds(allIds);
-    try { localStorage.setItem("cmr_notif_read", JSON.stringify(allIds)); } catch {}
-  };
-
-  const markRead = (id) => {
-    const updated = [...new Set([...readIds, id])];
-    setReadIds(updated);
-    try { localStorage.setItem("cmr_notif_read", JSON.stringify(updated)); } catch {}
-    setOpenMenu(null);
-  };
-
-  const deleteNotif = (id) => {
-    const updated = [...deletedIds, id];
-    setDeletedIds(updated);
-    try { localStorage.setItem("cmr_notif_deleted", JSON.stringify(updated)); } catch {}
-    setOpenMenu(null);
-  };
-
-  // Merge read/deleted state into notifications
-  const merged = notifications
-    .filter(n => !deletedIds.includes(n.id))
-    .map(n => ({ ...n, read: readIds.includes(n.id) || n.read }));
-
-  const filtered = merged.filter(n => {
-    const matchSearch = n.title.toLowerCase().includes(search.toLowerCase()) || n.desc.toLowerCase().includes(search.toLowerCase());
-    const matchFilter = filter === "All" || (filter === "Unread" && !n.read) || (filter === "Updated" && n.read);
-    return matchSearch && matchFilter;
-  });
-
-  const unreadCount = merged.filter(n => !n.read).length;
 
   useEffect(() => {
     function handleClick(e) {
@@ -257,6 +230,40 @@ export default function AdminNotifications() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
+  if (!mounted) return null;
+  if (!admin) return null;
+
+  const markAllRead = () => {
+    const allIds = notifications.map(n => n.id);
+    setReadIds(allIds);
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    localStorage.setItem("cmr_notif_read", JSON.stringify(allIds));
+  };
+
+  const markRead = (id) => {
+    const updated = [...new Set([...readIds, id])];
+    setReadIds(updated);
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    localStorage.setItem("cmr_notif_read", JSON.stringify(updated));
+    setOpenMenu(null);
+  };
+
+  const deleteNotif = (id) => {
+    const updated = [...deletedIds, id];
+    setDeletedIds(updated);
+    setNotifications(prev => prev.filter(n => n.id !== id));
+    localStorage.setItem("cmr_notif_deleted", JSON.stringify(updated));
+    setOpenMenu(null);
+  };
+
+  const filtered = notifications.filter(n => {
+    const matchSearch = n.title.toLowerCase().includes(search.toLowerCase()) || n.desc.toLowerCase().includes(search.toLowerCase());
+    const matchFilter = filter === "All" || (filter === "Unread" && !n.read) || (filter === "Updated" && n.read);
+    return matchSearch && matchFilter;
+  });
+
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
     <div className="min-h-screen flex flex-col bg-neutral-900">
@@ -271,7 +278,6 @@ export default function AdminNotifications() {
 
         <main className="flex-1 p-6 bg-white rounded-tl-xl overflow-auto">
 
-          {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <h2 className="text-gray-900 font-extrabold text-xl">Notifications</h2>
@@ -281,7 +287,6 @@ export default function AdminNotifications() {
             </div>
           </div>
 
-          {/* Search + Filter + Mark all read */}
           <div className="flex items-center gap-3 mb-6">
             <div className="flex-1 flex items-center gap-3 bg-gray-100 border border-gray-200 rounded-xl px-4 py-2">
               <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -289,7 +294,7 @@ export default function AdminNotifications() {
               </svg>
               <input
                 className="flex-1 bg-transparent text-sm text-gray-700 focus:outline-none placeholder-gray-400"
-                placeholder="Search notifications...."
+                placeholder="Search notifications..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -328,80 +333,79 @@ export default function AdminNotifications() {
             </button>
           </div>
 
-          {/* Notification list */}
-          <div className="space-y-3">
-            {filtered.length === 0 && merged.length > 0 && (
-              <div className="flex flex-col items-center justify-center py-12 rounded-xl bg-gray-100">
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
-                </svg>
-                <p className="text-gray-400 text-sm">No notifications match your search.</p>
-              </div>
-            )}
+          {loading ? (
+            <div className="py-20 text-center text-gray-400">
+              <div className="w-8 h-8 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              Loading notifications...
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filtered.length === 0 && notifications.length > 0 && (
+                <div className="flex flex-col items-center justify-center py-12 rounded-xl bg-gray-100">
+                  <p className="text-gray-400 text-sm">No notifications match your search.</p>
+                </div>
+              )}
 
-            {filtered.map((n) => (
-              <div
-                key={n.id}
-                className={`flex items-center gap-4 px-5 py-4 rounded-xl border transition-colors ${n.read ? "bg-gray-100 border-gray-200" : "bg-white border-yellow-300 shadow-sm"}`}
-              >
-                <NotifIcon type={n.type} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className={`text-sm font-bold ${n.read ? "text-gray-500" : "text-gray-900"}`}>{n.title}</p>
-                    {!n.read && <span className="w-2 h-2 rounded-full bg-yellow-400 flex-shrink-0" />}
-                  </div>
-                  <p className="text-gray-500 text-xs mt-0.5">{n.desc}</p>
-                  {n.bookingId && (
+              {filtered.map((n) => (
+                <div
+                  key={n.id}
+                  className={`flex items-center gap-4 px-5 py-4 rounded-xl border transition-colors ${n.read ? "bg-gray-100 border-gray-200" : "bg-white border-yellow-300 shadow-sm"}`}
+                >
+                  <NotifIcon type={n.type} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className={`text-sm font-bold ${n.read ? "text-gray-500" : "text-gray-900"}`}>{n.title}</p>
+                      {!n.read && <span className="w-2 h-2 rounded-full bg-yellow-400 flex-shrink-0" />}
+                    </div>
+                    <p className="text-gray-500 text-xs mt-0.5">{n.desc}</p>
                     <button
                       onClick={() => router.push("/admin/bookings")}
                       className="text-yellow-600 text-xs font-semibold hover:underline mt-1 inline-block"
                     >
                       View booking →
                     </button>
-                  )}
-                </div>
-                <span className="text-gray-400 text-xs whitespace-nowrap flex-shrink-0">{n.time}</span>
+                  </div>
+                  <span className="text-gray-400 text-xs whitespace-nowrap flex-shrink-0">{n.time}</span>
 
-                <div className="relative flex-shrink-0">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === n.id ? null : n.id); }}
-                    className="p-1 hover:bg-gray-200 rounded-lg transition-colors"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
-                      <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
-                    </svg>
-                  </button>
-                  {openMenu === n.id && (
-                    <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-xl shadow-lg z-20 overflow-hidden">
-                      {!n.read && (
-                        <button onClick={() => markRead(n.id)} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 font-medium">
-                          Mark as Read
+                  <div className="relative flex-shrink-0">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === n.id ? null : n.id); }}
+                      className="p-1 hover:bg-gray-200 rounded-lg transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
+                        <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
+                      </svg>
+                    </button>
+                    {openMenu === n.id && (
+                      <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-xl shadow-lg z-20 overflow-hidden">
+                        {!n.read && (
+                          <button onClick={() => markRead(n.id)} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 font-medium">
+                            Mark as Read
+                          </button>
+                        )}
+                        <button onClick={() => router.push("/admin/bookings")} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 font-medium">
+                          View Booking
                         </button>
-                      )}
-                      <button onClick={() => router.push("/admin/bookings")} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 font-medium">
-                        View Booking
-                      </button>
-                      <button onClick={() => deleteNotif(n.id)} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 font-medium">
-                        Delete
-                      </button>
-                    </div>
-                  )}
+                        <button onClick={() => deleteNotif(n.id)} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 font-medium">
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
 
-            {/* Empty state — no bookings at all */}
-            {merged.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-16 rounded-xl bg-gray-100">
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-14 h-14 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <p className="text-gray-400 text-sm font-medium">No new notifications yet.</p>
-                <p className="text-gray-300 text-xs mt-1">All bookings are up to date.</p>
-              </div>
-            )}
-          </div>
-
+              {notifications.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-16 rounded-xl bg-gray-100">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-14 h-14 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <p className="text-gray-400 text-sm font-medium">No notifications yet.</p>
+                  <p className="text-gray-300 text-xs mt-1">All bookings are up to date.</p>
+                </div>
+              )}
+            </div>
+          )}
         </main>
       </div>
 
