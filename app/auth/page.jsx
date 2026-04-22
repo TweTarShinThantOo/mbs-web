@@ -95,7 +95,7 @@ export default function AuthPage() {
   const [loginErrors, setLoginErrors] = useState({});
   const [loginLoading, setLoginLoading] = useState(false);
 
-  const [signupData, setSignupData] = useState({ fullname: "", email: "", password: "", confirm: "" });
+  const [signupData, setSignupData] = useState({ fullname: "", email: "", password: "", confirm: "", phone: "" });
   const [signupErrors, setSignupErrors] = useState({});
   const [signupSuccess, setSignupSuccess] = useState(false);
   const [signupLoading, setSignupLoading] = useState(false);
@@ -120,15 +120,15 @@ export default function AuthPage() {
       }
 
       // ✅ Fetch user profile from users table
-      const { data: profile } = await supabase
-        .from("users")
-        .select("name, email, phone")
-        .eq("user_id", data.user.id)
-        .single();
+     const { data: profile } = await supabase
+  .from("users")
+  .select("full_name, email, phone")
+  .eq("user_id", data.user.id)
+  .single();
 
       login({
         id: data.user.id,
-        name: profile?.name || loginData.email.split("@")[0],
+        name: profile?.full_name  || loginData.email.split("@")[0],
         email: data.user.email,
         phone: profile?.phone || "",
       });
@@ -165,11 +165,14 @@ export default function AuthPage() {
       }
 
       // ✅ Save user profile to users table
-      await supabase.from("users").insert({
-        user_id: data.user.id,
-        name: signupData.fullname.trim(),
-        email: signupData.email.trim(),
-      });
+      // ✅ Correct column name
+await supabase.from("users").insert({
+  user_id: data.user.id,
+  full_name: signupData.fullname.trim(),
+  email: signupData.email.trim(),
+  role: "Customer",
+  phone: signupData.phone.trim(), // ✅ add this
+});
 
       login({
         id: data.user.id,
@@ -321,6 +324,16 @@ export default function AuthPage() {
                         />
                         {signupErrors.confirm && <p className="text-red-500 text-xs mt-1">{signupErrors.confirm}</p>}
                       </div>
+                      <div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+  <input
+    type="text"
+    placeholder="0XX-XXX-XXXX"
+    value={signupData.phone}
+    onChange={(e) => { setSignupData({ ...signupData, phone: e.target.value }); }}
+    className="w-full border rounded-lg px-4 py-2 text-sm text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400 border-gray-300"
+  />
+</div>
                       <button
                         onClick={handleSignup}
                         disabled={signupLoading}
