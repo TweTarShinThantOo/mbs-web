@@ -1,6 +1,5 @@
 "use client";
 import { createContext, useContext, useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
 
 const defaultMascots = [
   { id: 1, name: "Rapunzel", category: "Princess", description: "Princess mascot perfect for birthday parties", price: 20, image: null },
@@ -16,63 +15,22 @@ const defaultMascots = [
 const MascotContext = createContext();
 
 export function MascotProvider({ children }) {
+  // Always start with defaultMascots so server and client render the same thing
   const [mascots, setMascots] = useState(defaultMascots);
   const [hydrated, setHydrated] = useState(false);
 
-  // ✅ Load mascots from Supabase on mount
+  // Only load from localStorage after hydration on the client
   useEffect(() => {
-    const loadMascots = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("mascots")
-          .select("*");
-
-        if (!error && data && data.length > 0) {
-          const mapped = data.map(m => ({
-            id: m.mascot_id,
-            name: m.mascot_name,
-            category: m.Category,
-            description: m.description || "",
-            price: m.price,
-            image: m.image || null,
-          }));
-          setMascots(mapped);
-          console.log("✅ Mascots loaded from Supabase");
-        } else {
-          // Fallback: seed default mascots to Supabase
-          console.warn("No mascots in Supabase, falling back to defaults");
-        }
-      } catch (err) {
-        console.warn("Failed to load from Supabase, using defaults:", err);
-      }
-      setHydrated(true);
-    };
-
-    loadMascots();
+    try {
+      const stored = localStorage.getItem("cmr_mascots");
+      if (stored) setMascots(JSON.parse(stored));
+    } catch {}
+    setHydrated(true);
   }, []);
 
-  const updateMascots = async (updated) => {
+  const updateMascots = (updated) => {
     setMascots(updated);
-    // Try to sync to Supabase
-    try {
-      for (const mascot of updated) {
-        if (mascot.id && mascot.id > 0) {
-          // Update existing
-          await supabase
-            .from("mascots")
-            .update({
-              mascot_name: mascot.name,
-              Category: mascot.category,
-              description: mascot.description,
-              price: mascot.price,
-              image: mascot.image,
-            })
-            .eq("mascot_id", mascot.id);
-        }
-      }
-    } catch (err) {
-      console.warn("Failed to sync mascots to Supabase:", err);
-    }
+    try { localStorage.setItem("cmr_mascots", JSON.stringify(updated)); } catch {}
   };
 
   return (
