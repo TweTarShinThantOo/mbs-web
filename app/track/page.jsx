@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCart } from "../../context/CartContext";
 import { useAuth } from "../../context/AuthContext";
+import { supabase } from "../../lib/supabase";
 
 function Navbar() {
   const { cart } = useCart();
@@ -143,68 +144,66 @@ export default function TrackPage() {
   const [notFound, setNotFound] = useState(false);
   const [searched, setSearched] = useState(false);
 
-  const handleTrack = () => {
+  const handleTrack = async () => {
     const trimmed = ticketInput.trim().toUpperCase();
     if (!trimmed) return;
 
     setSearched(true);
 
-    const getAdminStatus = (id) => {
-      try {
-        const statuses = JSON.parse(localStorage.getItem("cmr_booking_statuses") || "{}");
-        return statuses[id] || null;
-      } catch { return null; }
-    };
-
     try {
-      const stored = sessionStorage.getItem(`booking_${trimmed}`);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        const adminStatus = getAdminStatus(parsed.id || trimmed);
-        const nameParts = (parsed.customer || "").split(" ");
-        setResult({
-          ticket: trimmed,
-          firstName: nameParts[0] || "—",
-          lastName: nameParts.slice(1).join(" ") || "—",
-          bookingDate: parsed.bookingDate || parsed.date || "—",
-          location: parsed.location || parsed.address || "—",
-          phone: parsed.phone || "—",
-          payment: parsed.payment || "—",
-          status: adminStatus || parsed.status || "Pending",
-        });
-        setNotFound(false);
+      const { data, error } = await supabase
+  .from("bookings")
+  .select("booking_ticket_no, event_date, event_type, event_address, status, total_price, user_id, phone")
+  .eq("booking_ticket_no", trimmed)
+  .maybeSingle();
+
+console.log("trimmed:", trimmed);
+console.log("data:", JSON.stringify(data));
+console.log("error:", JSON.stringify(error));
+
+
+      if (error || !data) {
+        setResult(null);
+        setNotFound(true);
         return;
       }
-    } catch {}
 
-    try {
-      const allBookings = JSON.parse(localStorage.getItem("cmr_bookings") || "[]");
-      const found = allBookings.find(b => b.id === trimmed);
-      if (found) {
-        const adminStatus = getAdminStatus(trimmed);
-        const nameParts = (found.customer || "").split(" ");
-        setResult({
-          ticket: trimmed,
-          firstName: nameParts[0] || "—",
-          lastName: nameParts.slice(1).join(" ") || "—",
-          bookingDate: found.date || found.bookingDate || "—",
-          location: found.location || found.address || "—",
-          phone: found.phone || "—",
-          payment: found.payment || "—",
-          status: adminStatus || found.status || "Pending",
-        });
-        setNotFound(false);
-        return;
-      }
-    } catch {}
+      const { data: userData } = await supabase
+  .from("users")
+  .select("full_name, phone")
+  .eq("user_id", data.user_id)
+  .single();
 
-    setResult(null);
-    setNotFound(true);
-  };
+console.log("booking data:", JSON.stringify(data));
+console.log("userData:", JSON.stringify(userData));
+
+      const fullName = userData?.full_name || "—";
+      const nameParts = fullName.split(" ");
+
+      setResult({
+        ticket: trimmed,
+        firstName: nameParts[0] || "—",
+        lastName: nameParts.slice(1).join(" ") || "—",
+        bookingDate: data.event_date
+          ? new Date(data.event_date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+          : "—",
+        location: data.event_address || "—",
+        phone: data.phone || "—",
+        payment: data.total_price ? `$${data.total_price}` : "—",
+        status: data.status || "pending",
+      });
+      setNotFound(false);
+    } catch (err) {
+      console.error("Track failed:", err);
+      setResult(null);
+      setNotFound(true);
+    }
+  }; // ✅ handleTrack ends here
 
   const statusColor = (status) => {
-    if (status === "Approved") return "bg-green-500 text-white";
-    if (status === "Cancelled") return "bg-red-500 text-white";
+    const s = status?.toLowerCase();
+    if (s === "approved") return "bg-green-500 text-white";
+    if (s === "cancelled") return "bg-red-500 text-white";
     return "bg-yellow-400 text-black";
   };
 
