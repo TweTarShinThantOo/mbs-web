@@ -140,33 +140,37 @@ function MiniCalendar() {
   const [showYearDropdown, setShowYearDropdown] = useState(false);
   const [allBookedDates, setAllBookedDates] = useState([]);
 
-  useEffect(() => {
+  // ✅ CORRECT — fetches booked dates for the calendar
+useEffect(() => {
   async function fetchBookedDates() {
     try {
-      const { data, error } = await supabase
+      const { data: bookingData, error: bookingError } = await supabase
         .from("bookings")
         .select("event_date, status")
         .neq("status", "cancelled");
-      if (error) throw error;
-      const dates = (data || [])
-        .map(b => {
-          try {
-            const d = new Date(b.event_date);
-            if (!isNaN(d)) return d.toISOString().slice(0, 10);
-          } catch {}
-          return null;
-        })
+      if (bookingError) throw bookingError;
+
+      const { data: availData, error: availError } = await supabase
+        .from("availability")
+        .select("date")
+        .eq("availability_status", "booked");
+      if (availError) throw availError;
+
+      const fromBookings = (bookingData || [])
+        .map(b => { try { const d = new Date(b.event_date); if (!isNaN(d)) return d.toISOString().slice(0, 10); } catch {} return null; })
         .filter(Boolean);
-      setAllBookedDates([...new Set(dates)]);
-      console.log("Booked dates:", dates);
+
+      const fromAvailability = (availData || [])
+        .map(a => a.date)
+        .filter(Boolean);
+
+      setAllBookedDates([...new Set([...fromBookings, ...fromAvailability])]);
     } catch (err) {
       console.error("Failed to fetch booked dates:", err);
-    
     }
   }
   fetchBookedDates();
 }, []);
-
   const years = [2028, 2027, 2026, 2025, 2024];
   const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const dayNames = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -244,49 +248,68 @@ const statusStyle = {
   Approved: "bg-green-500 text-white",
   Pending: "bg-orange-400 text-white",
   Cancelled: "bg-red-500 text-white",
-};;
+};
 
 export default function AdminDashboard() {
-  const { admin, hydrated } = useAdminAuth();
+  const { admin } = useAdminAuth();
   const router = useRouter();
   const [bookings, setBookings] = useState([]);
+  const [mounted, setMounted] = useState(false); // ✅ add
 
   useEffect(() => {
-    if (hydrated && !admin) router.push("/admin/login");
-  }, [admin, router, hydrated]);
+    setMounted(true); // ✅ add
+  }, []);
 
- useEffect(() => {
-  async function fetchBookings() {
-    try {
-      const { data, error } = await supabase
-        .from("bookings")
-        .select("booking_id, booking_ticket_no, event_date, event_type, status, total_price");
-      if (error) throw error;
-      console.log("Bookings from Supabase:", data); // ✅ add here
-      setBookings((data || []).map(b => ({
-        id: b.booking_ticket_no || b.booking_id,
-        customer: "Customer",
-        date: b.event_date,
-        status: b.status,
-        event: b.event_type || "—",
-      })));
-    } catch (err) {
-      console.error("Failed to fetch bookings:", err);
+  useEffect(() => {
+    if (!admin) router.push("/admin/login");
+  }, [admin]);
+
+  useEffect(() => {
+    async function fetchBookings() {
+      try {
+        const { data, error } = await supabase
+          .from("bookings")
+          .select("booking_id, event_date, event_type, status, user_id")
+          .order("event_date", { ascending: false });
+        if (error) throw error;
+
+        const { data: usersData, error: usersError } = await supabase
+  .from("users")
+  .select("user_id, full_name");
+
+
+
+        const usersMap = {};
+        (usersData || []).forEach(u => { usersMap[u.user_id] = u.full_name; });
+
+        setBookings((data || []).map(b => ({
+          id: b.booking_id,
+          customer: usersMap[b.user_id] || "Unknown",
+          date: b.event_date,
+          status: b.status,
+          event: b.event_type || "",
+        })));
+      } catch (err) {
+        console.error("Failed to fetch bookings:", err);
+      }
     }
-  }
-  fetchBookings();
-}, []);
+    fetchBookings();
+  }, []);
 
+  if (!mounted) return null; // ✅ add — must be before if (!admin)
   if (!admin) return null;
 
+
   const totalBookings = bookings.length;
- const pendingCount = bookings.filter(b => b.status === "pending").length;
-const approvedCount = bookings.filter(b => b.status === "approved").length;
+const pendingCount = bookings.filter(b => b.status === "pending" || b.status === "Pending").length;
+const approvedCount = bookings.filter(b => b.status === "approved" || b.status === "Approved").length;
 
   const TOTAL_SLOTS = 100;
   const bookedSlots = approvedCount;
   const pendingSlots = pendingCount;
   const availableSlots = Math.max(TOTAL_SLOTS - bookedSlots - pendingSlots, 0);
+
+  const recentBookings = bookings.slice(0, 4);
 
   const monthOrder = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const monthCounts = {};
@@ -353,8 +376,8 @@ const approvedCount = bookings.filter(b => b.status === "approved").length;
                       </tr>
                     </thead>
                     <tbody>
-                      {bookings.map((b, idx) => (
-                        <tr key={b.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                      {recentBookings.map((b, idx) => (
+                        <tr key={b.supabase_id || b.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                           <td className="px-3 py-3 text-gray-800 font-bold text-xs">{`CMR-${String(bookings.length - idx).padStart(3, "0")}`}</td>
                           <td className="px-3 py-3 text-gray-600 text-xs">{b.customer}</td>
                           <td className="px-3 py-3 text-gray-500 text-xs">{formatDate(b.date)}</td>
