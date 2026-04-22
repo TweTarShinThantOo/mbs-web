@@ -182,102 +182,64 @@ export default function BookingPage() {
     setSubmitError("");
 
     try {
-      const ticket = generateTicket();
+  let lastTicket = ""; // ✅ track the last saved ticket
 
-      // Get the first cart item's date as event_date (or today as fallback)
-      const eventDate = cart[0]?.date || new Date().toISOString().slice(0, 10);
-      const eventType = cart.map(item => item.name).join(", ");
-      const addOns = [
-        ...(additionalFees.extraStaff ? ["Extra Staff"] : []),
-        ...(additionalFees.photoVideo ? ["Photo & Video"] : []),
-      ];
+  const addOns = [
+    ...(additionalFees.extraStaff ? ["Extra Staff"] : []),
+    ...(additionalFees.photoVideo ? ["Photo & Video"] : []),
+  ];
 
-      let bookingId = null;
+  // ✅ Insert one booking row per cart item with unique ticket
+  for (const item of cart) {
+    const itemTicket = generateTicket();
+    lastTicket = itemTicket; // ✅ update on each iteration
 
-      // ✅ Try to save booking to Supabase bookings table
-      try {
-        const { data: bookingData, error: bookingError } = await supabase
-          .from("bookings")
-          .insert([
-            {
-              booking_ticket_no: ticket,
-              event_date: eventDate,
-              event_type: eventType,
-              event_address: address,
-              total_price: total,
-              status: "pending",
-              user_id: user?.id || "guest",
-            },
-          ])
-          .select()
-          .single();
+    const { error: bookingError } = await supabase
+  .from("bookings")
+  .insert([{
+    booking_ticket_no: itemTicket,
+    event_date: item.date || new Date().toISOString().slice(0, 10),
+    event_type: item.name,
+    event_address: address,
+    total_price: total,
+    status: "pending",
+    user_id: user.id,
+    phone: phone, // ✅ is this line there?
+  }]);
 
-        if (!bookingError && bookingData) {
-          bookingId = bookingData.booking_id;
-          console.log("✅ Booking saved to Supabase:", bookingId);
-
-          // ✅ Save each cart item to booking_items table
-          if (cart.length > 0) {
-            const bookingItems = cart.map(item => ({
-              booking_id: bookingId,
-              mascot_id: item.id,
-              mascot_name: item.name,
-              price: item.price,
-              date: item.date || eventDate,
-            }));
-
-            const { error: itemsError } = await supabase
-              .from("booking_items")
-              .insert(bookingItems);
-
-            if (itemsError) console.warn("booking_items insert failed:", itemsError);
-          }
-        } else {
-          console.warn("Supabase insert failed, will use localStorage fallback:", bookingError);
-        }
-      } catch (supabaseErr) {
-        console.warn("Supabase error, using localStorage fallback:", supabaseErr);
-      }
-
-      // Save to sessionStorage & localStorage for confirmation/track page (fallback)
-      const booking = {
-        id: ticket,
-        booking_id: bookingId,
-        customer: name.trim(),
-        phone,
-        event: eventType,
-        bookingDate: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
-        location: address,
-        address,
-        payment: `${paymentMethod} — $${total}`,
-        total,
-        status: "pending",
-        addOns,
-      };
-      // Keep sessionStorage for compatibility (optional fallback)
-      sessionStorage.setItem(`booking_${ticket}`, JSON.stringify(booking));
-
-      // ✅ Also save to localStorage as fallback for admin page
-      try {
-        const allBookings = JSON.parse(localStorage.getItem("cmr_bookings") || "[]");
-        // Check if booking already exists
-        const exists = allBookings.some(b => b.id === ticket);
-        if (!exists) {
-          allBookings.push(booking);
-          localStorage.setItem("cmr_bookings", JSON.stringify(allBookings));
-        }
-      } catch {}
-
-      clearCart();
-      router.push(
-        `/confirmation?ticket=${ticket}&total=${total}&name=${encodeURIComponent(name)}&phone=${encodeURIComponent(phone)}&address=${encodeURIComponent(address)}`
-      );
-    } catch (err) {
-      console.error("Booking failed:", err);
-      setSubmitError("Something went wrong. Please try again.");
-    } finally {
-      setLoading(false);
+    if (bookingError) {
+      console.error("Supabase booking error:", JSON.stringify(bookingError));
+      throw bookingError;
     }
+  }
+
+  // ✅ Save to sessionStorage using lastTicket
+  const booking = {
+    id: lastTicket,
+    customer: name.trim(),
+    phone,
+    event: cart.map(item => item.name).join(", "),
+    bookingDate: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+    location: address,
+    address,
+    payment: `${paymentMethod} — $${total}`,
+    total,
+    status: "pending",
+    addOns,
+  };
+  sessionStorage.setItem(`booking_${lastTicket}`, JSON.stringify(booking));
+
+  clearCart();
+  // ✅ Use lastTicket for redirect
+  router.push(
+    `/confirmation?ticket=${lastTicket}&total=${total}&name=${encodeURIComponent(name)}&phone=${encodeURIComponent(phone)}&address=${encodeURIComponent(address)}`
+  );
+} catch (err) {
+  console.error("Booking failed:", err);
+  setSubmitError("Something went wrong. Please try again.");
+} finally {
+  setLoading(false);
+}
   };
 
   return (
