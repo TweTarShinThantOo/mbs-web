@@ -126,12 +126,56 @@ function MiniCalendar({ mascotId, selectedDate, onSelectDate }) {
   const [currentMonth, setCurrentMonth] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [booked, setBooked] = useState([]);
 
-  useEffect(() => {
+ // ✅ Fetch booked dates from Supabase
+useEffect(() => {
+  async function fetchBookedDates() {
     try {
-      const all = JSON.parse(localStorage.getItem("cmr_booked_dates") || "{}");
-      setBooked(all[String(mascotId)] || []);
-    } catch {}
-  }, [mascotId]);
+      // Fetch from bookings table - dates booked by customers
+      const { data: bookingData } = await supabase
+        .from("bookings")
+        .select("event_date, event_type, status")
+        .neq("status", "cancelled");
+
+      // Fetch from availability table - dates blocked by admin
+      const { data: availData } = await supabase
+        .from("availability")
+        .select("date, mascot_id")
+        .eq("mascot_id", mascotId)
+        .eq("availability_status", "booked");
+
+      // Get mascot name to match bookings
+      const { data: mascotData } = await supabase
+        .from("mascots")
+        .select("mascot_name")
+        .eq("mascot_id", mascotId)
+        .single();
+
+      const mascotName = mascotData?.mascot_name || "";
+
+      // From bookings - match by mascot name in event_type
+      const fromBookings = (bookingData || [])
+        .filter(b => b.event_type === mascotName)
+        .map(b => {
+          try {
+            const d = new Date(b.event_date);
+            if (!isNaN(d)) return d.toISOString().slice(0, 10);
+          } catch {}
+          return null;
+        })
+        .filter(Boolean);
+
+      // From availability table
+      const fromAvailability = (availData || [])
+        .map(a => a.date)
+        .filter(Boolean);
+
+      setBooked([...new Set([...fromBookings, ...fromAvailability])]);
+    } catch (err) {
+      console.error("Failed to fetch booked dates:", err);
+    }
+  }
+  fetchBookedDates();
+}, [mascotId]);
 
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
