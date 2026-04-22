@@ -11,12 +11,12 @@ export function AuthProvider({ children }) {
     // ✅ Check if user is already logged in on page load
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        supabase.from("users").select("name, email, phone")
+        supabase.from("users").select("full_name, email, phone")
           .eq("user_id", session.user.id).single()
           .then(({ data: profile }) => {
             setUser({
               id: session.user.id,
-              name: profile?.name || session.user.email.split("@")[0],
+              name: profile?.full_name || session.user.email.split("@")[0],
               email: session.user.email,
               phone: profile?.phone || "",
             });
